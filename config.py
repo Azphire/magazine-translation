@@ -1,10 +1,15 @@
 import os
+from dotenv import load_dotenv
 
-# Set up API Keys (ensure you have a .env file locally)
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+load_dotenv()
 
-# Configuration variables
+# Global Configuration
 MAX_RETRIES = 3
 TEMP_DIR = "./data/temp"
 OUTPUT_DIR = "./data/output"
+
+# Typography Configuration
+FONT_PATH = "./data/simhei.ttf"
+
+# Inpainting Configuration (Simplified)
+STABILITY_API_KEY = os.getenv("STABILITY_API_KEY", "")
