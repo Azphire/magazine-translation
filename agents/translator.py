@@ -6,21 +6,23 @@ from utils.logger import logger
 from core.state import TranslationState
 
 client = OpenAI()
-PROMPT_FILE = "./prompts/vision_translator.txt"
 
+def load_prompt(filename: str) -> str:
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    filepath = os.path.join(base_dir, "prompts", filename)
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read().strip()
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
-
 def translator_node(state: TranslationState) -> dict:
     logger.info("[Translator] Starting multi-modal translation...")
 
-    # 【核心修复 1】：正确对齐 vision_parser 输出的数据结构
     parsed_json = state.get("parsed_json", {})
     blocks = parsed_json.get("blocks", [])
-
+    
     img_path = state.get("image_path")
     memory = state.get("memory_dict", {})
 
@@ -31,15 +33,14 @@ def translator_node(state: TranslationState) -> dict:
     base64_image = encode_image(img_path)
     source_texts = {str(i): b["text"] for i, b in enumerate(blocks)}
 
-    # 读取外部 Prompt 模板
+    # 1. Load External Prompt Template
     try:
-        with open(PROMPT_FILE, "r", encoding="utf-8") as f:
-            prompt_template = f.read()
+        prompt_template = load_prompt("vision_translator.txt")
     except IOError:
-        logger.error(f"[Translator] Prompt file not found: {PROMPT_FILE}")
-        return {"translated_blocks": blocks}
+        logger.error("[Translator] Prompt file not found.")
+        return {"translated_blocks": []}
 
-    # 注入动态数据
+    # 2. Inject Dynamic Data
     prompt_text = prompt_template.replace(
         "[MEMORY]", json.dumps(memory, ensure_ascii=False)
     ).replace(
@@ -47,6 +48,7 @@ def translator_node(state: TranslationState) -> dict:
     )
 
     try:
+        # 3. Execute VLM Call with Contextual Image
         response = client.chat.completions.create(
             model="gpt-4o",
             response_format={"type": "json_object"},
@@ -60,7 +62,7 @@ def translator_node(state: TranslationState) -> dict:
                 }
             ],
             temperature=0.3,
-            max_tokens=4096
+            max_tokens=4096 # Prevent JSON truncation for double-page spreads
         )
 
         translated_dict = json.loads(response.choices[0].message.content)
@@ -81,8 +83,7 @@ def translator_node(state: TranslationState) -> dict:
                 "source_text": original_text,
                 "target_text": translated_text,
                 "box": b["box"],
-                # 【核心修复 2】：使用 .get() 防御 KeyError，因为 parser 模型中未定义 type
-                "type": b.get("type", "text")
+                "style": b.get("style", "body") # Pass through semantic style for Renderer
             })
 
         logger.info("====================================\n")

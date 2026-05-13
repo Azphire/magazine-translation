@@ -4,8 +4,12 @@ from utils.logger import logger
 from openai import OpenAI
 
 MEMORY_FILE = "./data/memory_db/memory.json"
-PROMPT_FILE = "./prompts/memory_extractor.txt"
 
+def load_prompt(filename: str) -> str:
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    filepath = os.path.join(base_dir, "prompts", filename)
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read().strip()
 
 class MemoryAgent:
     def __init__(self):
@@ -29,19 +33,18 @@ class MemoryAgent:
     def update_memory(self, translated_blocks):
         logger.info("[Memory Agent] Extracting new entities from current page...")
 
-        # 收集本页的所有中英对照
+        # Collect all EN-ZH pairs from the current page
         translation_pairs = [f"EN: {b['source_text']} \nZH: {b['target_text']}" for b in translated_blocks]
         combined_text = "\n\n".join(translation_pairs)
 
-        # 读取外部 Prompt 模板
+        # Load external Prompt template
         try:
-            with open(PROMPT_FILE, "r", encoding="utf-8") as f:
-                prompt_template = f.read()
+            prompt_template = load_prompt("memory_extractor.txt")
         except IOError:
-            logger.error(f"[Memory Agent] Prompt file not found: {PROMPT_FILE}")
+            logger.error("[Memory Agent] Prompt file not found.")
             return
 
-        # 注入动态数据
+        # Inject dynamic data
         prompt = prompt_template.replace("[COMBINED_TEXT]", combined_text)
 
         try:

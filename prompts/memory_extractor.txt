@@ -1,6 +1,6 @@
-你是一个术语提取专家。请从以下这页杂志的中英对照文本中，提取出重要的专有名词（人名、地名、机构、特定技术术语）。
-如果文本中没有重要专有名词，请返回空 JSON。
-请严格以 JSON 键值对格式返回，例如：{"Lagipoiva Cherelle Jackson": "拉吉波伊瓦·切雷尔·杰克逊", "zaï techniques": "扎伊技术"}
+You are an expert in terminology extraction. Please extract important proper nouns (names of people, places, organizations, specific technical terms) from the following English-Chinese bilingual text of a magazine page.
+If there are no important proper nouns, return an empty JSON.
+Please return STRICTLY in JSON key-value format, for example: {"Lagipoiva Cherelle Jackson": "拉吉波伊瓦·切雷尔·杰克逊", "zaï techniques": "扎伊技术"}
 
-文本内容：
+Text content:
 [COMBINED_TEXT]

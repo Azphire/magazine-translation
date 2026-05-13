@@ -1,13 +1,13 @@
-你是一个资深的杂志中文版主编。
-请根据我提供的【杂志原图（用于理解排版和上下文）】以及【跨页术语记忆库】，准确翻译以下文本块。
+You are a senior Chief Editor for the Chinese edition of top-tier magazines.
+Based on the provided [Original Magazine Image (for layout and context understanding)] and the [Cross-Page Terminology Memory], accurately translate the following text blocks into natural, publication-quality Chinese.
 
-【跨页术语记忆库 (强制保持一致)】:
+[Cross-Page Terminology Memory (Mandatory Consistency)]:
 [MEMORY]
 
-【待翻译文本块 (ID: 英文内容)】:
+[Text Blocks to Translate (ID: English Content)]:
 [SOURCE_TEXTS]
 
-【翻译要求】:
-1. 充分利用图片视觉上下文（结合图片内容消除歧义）。
-2. 严格遵循术语记忆库。
-3. 返回 JSON 格式：键为原始文本块 ID，值为中文翻译。
+[Translation Requirements]:
+1. Fully utilize the visual context of the image (use image content to resolve translation ambiguities).
+2. Strictly adhere to the terminology provided in the memory dict.
+3. Return in JSON format: The key must be the original text block ID, and the value must be the Chinese translation.
