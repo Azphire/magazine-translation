@@ -20,7 +20,7 @@ def load_prompt(filename: str) -> str:
 def contains_bad_english(text: str) -> bool:
     """Detect obvious untranslated English while allowing names, acronyms, and Latin binomials."""
     cleaned = text
-    # Allow content inside parentheses for names/scientific names, e.g. （Daniel Robinson）, (Piper methysticum)
+    # Allow content inside parentheses for names/scientific names, e.g. (Daniel Robinson), (Piper methysticum)
     cleaned = re.sub(r"[（(][^）)]*[A-Za-z][^）)]*[）)]", "", cleaned)
     # Allow common acronyms and treaty/organization abbreviations.
     cleaned = re.sub(r"\b(?:UNESCO|WIPO|WTO|CBD|DNA|IP|ABS)\b", "", cleaned)

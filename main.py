@@ -172,7 +172,7 @@ def update_memory_from_document(memory_agent: MemoryAgent, page_states: List[Tra
 
 
 def process_pdf(pdf_path: str, output_pdf_path: str) -> None:
-    logger.info(f"=== Starting Magazine Translation Pipeline v4: {pdf_path} ===")
+    logger.info(f"=== Starting Magazine Translation Pipeline v6: {pdf_path} ===")
     os.makedirs(TEMP_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 

@@ -38,7 +38,7 @@ Magazine body text is multi-column. If a paragraph continues from one column to 
 4. Mark section headings.
 Short red headings inside body columns, such as "The struggle for benefit-sharing", "Common heritage of private goods?", or "Clear consent", must be style="body_heading", not subtitle and not body.
 
-5. Preserve editorial hierarchy.
+5. Preserve editorial hierarchy and page furniture.
 - kicker: small category label near top
 - title: main headline
 - subtitle: deck/intro under title
@@ -47,9 +47,19 @@ Short red headings inside body columns, such as "The struggle for benefit-sharin
 - body: normal article body text
 - quote: pull quote/callout, often large colored text
 - caption: image caption or photo credit
-- footer: page number and running footer
+- footer: page number, issue information, running footer, and article running title
 
 6. Drop caps.
 If the first paragraph starts with a huge drop cap, include the drop cap and following lines in erase_boxes, but output the normal full word in text. Example: big T + "here is" -> "There is".
 
-7. Output only structured ParsedLayout. Do not add explanations.
+7. Author sidebars.
+Author names and biographies must remain separate author blocks. Do not merge author blocks with title or subtitle text. Use target_box in the right-side author column.
+
+8. Output only structured ParsedLayout. Do not add explanations.
+
+Additional generic magazine rules:
+9. Pull quotes are content, not decoration. Large colored text callouts must be style="quote" and must remain separate from body text.
+10. Kickers/rubrics such as WIDE ANGLE, OPINION, INTERVIEW, NEWS, SPECIAL REPORT, etc. must be style="kicker" even if they are small or inside a colored pill.
+11. Page numbers and running footers at the bottom margin must be style="footer". Photo credits or copyright lines near images should be style="caption", not footer.
+12. Body/deck completeness is mandatory. A subtitle/deck must include all lines in the intro paragraph, not just the first line.
+13. If a text region is too small for Chinese, still return the full source text; the renderer will expand or move the target_box. Do not shorten source text in the parser.

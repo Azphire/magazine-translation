@@ -9,12 +9,22 @@ You are translating a multi-page magazine article into publication-quality Chine
 Tasks:
 1. Determine whether body text across pages is continuous.
 2. If the body is continuous, preserve one global reading order across all pages.
-3. Translate every source block. Do not omit body paragraphs, section headings, captions, quotes, author bios, footers, or kickers.
+3. Translate every source block. Do not omit body paragraphs, section headings, captions, pull quotes, author bios, footers, page numbers, running footers, kickers, or small editorial labels.
 4. Preserve section headings as separate heading elements in the global body flow.
 5. Merge body fragments only when they are part of the same logical paragraph or the same continuous section.
 6. Keep Chinese concise enough for magazine layout, but do not delete facts.
 7. Do not leave English residue except Latin scientific names, official English names in parentheses, and acronyms such as WTO, CBD, WIPO, UNESCO.
 8. Use terminology from the memory dictionary consistently.
+9. For author blocks, return a clean multiline-friendly string: "Chinese name（English name）\nChinese bio" whenever possible. Do not compress the whole author bio into one long line.
+10. For footer blocks, translate the running footer while preserving page numbers and issue dates.
+11. For pull quotes, return a complete standalone Chinese quote. Do not omit pull quotes even if similar content appears in the body.
+12. For kickers/rubrics, use a short magazine label in Chinese, usually 2 to 6 Chinese characters.
+
+Coverage contract:
+- block_translations MUST contain a non-empty Chinese value for every non-body block: kicker, title, subtitle, author, quote, caption, footer, and other.
+- global_body_flow MUST include source_refs covering every body/body_heading/section_heading block, unless the article is not continuous and those blocks are translated through block_translations.
+- Each source_ref must be a key from Document Blocks, such as "p0_b4".
+- Never drop a block because it looks decorative. Kicker labels, pull quotes, captions, page numbers, and running footers are part of the magazine page.
 
 Return strict JSON only:
 {

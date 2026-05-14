@@ -55,21 +55,102 @@ def _make_payload(page_states: List[TranslationState]) -> Tuple[List[dict], Dict
     return payload, lookup
 
 
-def _validate_document_result(result: dict) -> List[str]:
+NON_BODY_STYLES = {"kicker", "title", "subtitle", "author", "quote", "caption", "footer", "other"}
+BODY_STYLES = {"body", "body_heading", "section_heading"}
+
+
+def _style_requires_block_translation(style: str) -> bool:
+    """Return whether a block must be translated as page furniture instead of body flow."""
+    return style in NON_BODY_STYLES
+
+
+def _validate_document_result(result: dict, payload: List[dict]) -> List[str]:
+    """Validate translation completeness before rendering.
+
+    This is intentionally strict. Non-body magazine furniture such as pull quotes,
+    kickers, captions, footers, and author bios must not silently disappear. Body
+    blocks must either appear in global_body_flow or have a block translation for
+    non-continuous layouts.
+    """
     errors: List[str] = []
-    for key, text in (result.get("block_translations") or {}).items():
-        if contains_bad_english(str(text)):
-            errors.append(f"block_translations[{key}] has English residue: {str(text)[:100]}")
-    for i, elem in enumerate(result.get("global_body_flow") or []):
-        text = str(elem.get("text", ""))
+    block_trans = result.get("block_translations") or {}
+    global_flow = result.get("global_body_flow") or []
+    flow_refs = {str(ref) for elem in global_flow for ref in elem.get("source_refs", [])}
+
+    payload_by_key = {str(item.get("key")): item for item in payload}
+
+    for item in payload:
+        key = str(item.get("key"))
+        style = str(item.get("style", "body"))
+        source_text = str(item.get("text", "")).strip()
+        if not source_text:
+            continue
+
+        if _style_requires_block_translation(style):
+            translated = str(block_trans.get(key, "")).strip()
+            if not translated:
+                errors.append(f"missing non-body translation for {key} style={style}")
+            elif contains_bad_english(translated):
+                errors.append(f"block_translations[{key}] has English residue: {translated[:100]}")
+        elif style in BODY_STYLES:
+            if key not in flow_refs and not str(block_trans.get(key, "")).strip():
+                errors.append(f"body block {key} is not represented in global_body_flow or block_translations")
+
+    for key, text in block_trans.items():
+        translated = str(text).strip()
+        if translated and contains_bad_english(translated):
+            errors.append(f"block_translations[{key}] has English residue: {translated[:100]}")
+
+    for i, elem in enumerate(global_flow):
+        text = str(elem.get("text", "")).strip()
+        refs = [str(r) for r in elem.get("source_refs", [])]
         if not text:
             errors.append(f"global_body_flow[{i}] is empty")
+        if not refs:
+            errors.append(f"global_body_flow[{i}] has no source_refs")
+        for ref in refs:
+            if ref not in payload_by_key:
+                errors.append(f"global_body_flow[{i}] references unknown block {ref}")
         if contains_bad_english(text):
             errors.append(f"global_body_flow[{i}] has English residue: {text[:100]}")
         if elem.get("type") not in ("paragraph", "heading"):
             errors.append(f"global_body_flow[{i}] type must be paragraph or heading")
+
     return errors
 
+
+def _translate_missing_blocks(missing_items: List[dict], memory: Dict[str, str], images: List[dict]) -> Dict[str, str]:
+    """Retry only missing magazine furniture blocks after the document call.
+
+    A small targeted retry is safer than allowing captions, quotes, or footers to
+    vanish. It also keeps the main document translation prompt from becoming too
+    large for long magazines.
+    """
+    if not missing_items:
+        return {}
+
+    prompt = (
+        "Translate the following magazine page-furniture blocks into concise, publication-quality Chinese.\n"
+        "Do not omit any block. Preserve page numbers in footers. For author blocks, use two-line friendly Chinese: "
+        "Chinese name（English name）\nChinese bio. Return strict JSON mapping each key to Chinese text.\n\n"
+        f"Terminology memory:\n{json.dumps(memory, ensure_ascii=False, indent=2)}\n\n"
+        f"Blocks:\n{json.dumps(missing_items, ensure_ascii=False, indent=2)}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}] + images[:3]}],
+            temperature=0.1,
+            max_tokens=4096,
+        )
+        data = json.loads(response.choices[0].message.content or "{}")
+        if isinstance(data, dict) and "translations" in data and isinstance(data["translations"], dict):
+            data = data["translations"]
+        return {str(k): str(v).strip() for k, v in data.items() if str(v).strip()}
+    except Exception as exc:
+        logger.error(f"[Document Translator] Missing-block retry failed: {exc}", exc_info=True)
+        return {}
 
 def translate_document(page_states: List[TranslationState], memory: Dict[str, str], max_retries: int = 2) -> Tuple[List[TranslationState], Dict]:
     """
@@ -108,7 +189,7 @@ def translate_document(page_states: List[TranslationState], memory: Dict[str, st
                 max_tokens=12000,
             )
             result = json.loads(response.choices[0].message.content or "{}")
-            errors = _validate_document_result(result)
+            errors = _validate_document_result(result, payload)
             if not errors:
                 break
             last_error = " | ".join(errors)
@@ -120,6 +201,20 @@ def translate_document(page_states: List[TranslationState], memory: Dict[str, st
         raise RuntimeError(f"Document-level translation failed: {last_error}")
 
     block_trans = result.get("block_translations") or {}
+
+    # Recover missing non-body blocks after the main document call. This protects
+    # pull quotes, captions, footers, and kickers from being dropped silently.
+    missing_non_body = []
+    for item in payload:
+        key = str(item.get("key"))
+        style = str(item.get("style", "body"))
+        if _style_requires_block_translation(style) and str(item.get("text", "")).strip() and not str(block_trans.get(key, "")).strip():
+            missing_non_body.append(item)
+    if missing_non_body:
+        logger.warning(f"[Document Translator] Retrying {len(missing_non_body)} missing non-body blocks.")
+        block_trans.update(_translate_missing_blocks(missing_non_body, memory, images))
+        result["block_translations"] = block_trans
+
     global_flow = result.get("global_body_flow") or []
     continuity = result.get("continuity") or []
     is_continuous = any(bool(item.get("is_continuous")) for item in continuity if isinstance(item, dict))
@@ -134,18 +229,18 @@ def translate_document(page_states: List[TranslationState], memory: Dict[str, st
     if not global_flow:
         # Emergency fallback: preserve document-level ordering but use block translations.
         for item in payload:
-            if item["style"] in ("body", "body_heading"):
+            if item["style"] in ("body", "body_heading", "section_heading"):
                 key = item["key"]
                 text = str(block_trans.get(key, "")).strip()
                 if text:
                     global_flow.append({
-                        "type": "heading" if item["style"] == "body_heading" else "paragraph",
+                        "type": "heading" if item["style"] in ("body_heading", "section_heading") else "paragraph",
                         "source_refs": [key],
                         "text": text,
                     })
 
     translated_by_page: Dict[int, List[dict]] = {int(s.get("page_num", 0)): [] for s in page_states}
-    body_styles = {"body", "body_heading"}
+    body_styles = {"body", "body_heading", "section_heading"}
 
     for key, (page_num, b) in lookup.items():
         style = b.get("style", "body")

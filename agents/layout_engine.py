@@ -325,13 +325,20 @@ def render_body_flow(
     fill: Tuple[int, int, int],
     heading_fill: Tuple[int, int, int],
 ) -> Tuple[List[DrawnBox], int, Dict[int, Dict[str, int]]]:
-    drawn: List[DrawnBox] = []
-    page_usage: Dict[int, Dict[str, int]] = {f.page_index: {"used": 0, "capacity": 0, "chars": 0} for f in frames}
-    for frame in frames:
-        page_usage[frame.page_index]["capacity"] += max(1, frame.box[3] - frame.box[1])
+    """
+    Render the continuous article body across all frames.
 
+    v5 fixes page fill diagnostics by tracking usage per frame instead of using
+    a single max-used value per page. The previous implementation underreported
+    page usage when several columns were partially filled.
+    """
+    drawn: List[DrawnBox] = []
     if not frames:
-        return drawn, sum(len(a.text) for a in atoms), page_usage
+        return drawn, sum(len(a.text) for a in atoms), {}
+
+    frame_used = [0 for _ in frames]
+    frame_chars = [0 for _ in frames]
+    frame_capacity = [max(1, f.box[3] - f.box[1]) for f in frames]
 
     frame_idx = 0
     y_cursor = frames[0].box[1]
@@ -346,6 +353,11 @@ def render_body_flow(
             return False
         y_cursor = frames[frame_idx].box[1]
         return True
+
+    def mark_usage(frame_index: int, cursor_y: int, chars: int) -> None:
+        frame = frames[frame_index]
+        frame_used[frame_index] = max(frame_used[frame_index], max(0, cursor_y - frame.box[1]))
+        frame_chars[frame_index] += max(0, chars)
 
     for atom in atoms:
         if frame_idx >= len(frames):
@@ -369,14 +381,15 @@ def render_body_flow(
                 x1, y1, x2, y2 = frame.box
                 width = max(20, x2 - x1)
                 lines = wrap_text(atom.text, font_heading, width)
+
             for line in lines:
                 draw_by_page[frame.page_index].text((x1, y_cursor), line, font=font_heading, fill=heading_fill)
                 w = text_width(font_heading, line)
                 drawn.append(DrawnBox(frame.page_index, [x1, y_cursor, x1 + w, y_cursor + lh], "heading", style.heading_font_size, atom.source_ids, line))
                 y_cursor += lh
-                page_usage[frame.page_index]["used"] = max(page_usage[frame.page_index]["used"], y_cursor - frame.box[1])
-                page_usage[frame.page_index]["chars"] += len(line)
+                mark_usage(frame_idx, y_cursor, len(line))
             y_cursor += gap_after
+            mark_usage(frame_idx, y_cursor, 0)
             continue
 
         lines = wrap_text(atom.text, font_regular, width, first_line_indent="　　")
@@ -400,13 +413,20 @@ def render_body_flow(
             w = text_width(font_regular, line)
             drawn.append(DrawnBox(frame.page_index, [x1, y_cursor, x1 + w, y_cursor + lh], "body", style.body_font_size, atom.source_ids, line))
             y_cursor += lh + line_gap
-            page_usage[frame.page_index]["used"] = max(page_usage[frame.page_index]["used"], y_cursor - frame.box[1])
-            page_usage[frame.page_index]["chars"] += len(line)
+            mark_usage(frame_idx, y_cursor, len(line))
+
         if frame_idx < len(frames):
             y_cursor += para_gap
+            mark_usage(frame_idx, y_cursor, 0)
+
+    page_usage: Dict[int, Dict[str, int]] = {}
+    for i, frame in enumerate(frames):
+        usage = page_usage.setdefault(frame.page_index, {"used": 0, "capacity": 0, "chars": 0})
+        usage["used"] += min(frame_used[i], frame_capacity[i])
+        usage["capacity"] += frame_capacity[i]
+        usage["chars"] += frame_chars[i]
 
     return drawn, unrendered_chars, page_usage
-
 
 def intersection_area(a: List[int], b: List[int]) -> int:
     x1, y1 = max(a[0], b[0]), max(a[1], b[1])
@@ -427,6 +447,7 @@ def drawn_boxes_to_report(
     page_usage: Dict[int, Dict[str, int]],
     unrendered_body_chars: int,
     expected_refs: List[str],
+    expected_non_body_refs: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     rendered_refs = set()
     for box in drawn:
@@ -434,6 +455,13 @@ def drawn_boxes_to_report(
             if source_id:
                 rendered_refs.add(str(source_id))
     missing_refs = [ref for ref in expected_refs if ref not in rendered_refs]
+    expected_non_body_refs = expected_non_body_refs or []
+    missing_non_body_refs = [ref for ref in expected_non_body_refs if ref not in rendered_refs]
+    truncated_boxes = [
+        {"page_index": box.page_index, "role": box.role, "text": box.text[:80], "source_ids": box.source_ids}
+        for box in drawn
+        if str(box.role).endswith("_truncated")
+    ]
 
     pages: Dict[int, Dict[str, Any]] = {}
     for frame in frames:
@@ -480,17 +508,27 @@ def drawn_boxes_to_report(
             "font_size": box.font_size,
             "text": box.text[:50],
         })
-        page["min_font_size"] = min(page["min_font_size"], box.font_size)
+        if box.role in {"body", "heading"}:
+            page["min_font_size"] = min(page["min_font_size"], box.font_size)
 
     for page in pages.values():
         boxes = page["drawn_boxes"]
         overlaps = []
         for i in range(len(boxes)):
             for j in range(i + 1, len(boxes)):
-                # Ignore normal body line stacking because line boxes should not overlap.
+                role_i = boxes[i].get("role")
+                role_j = boxes[j].get("role")
+                if role_i in {"footer", "kicker"} or role_j in {"footer", "kicker"}:
+                    continue
                 ratio = overlap_ratio(boxes[i]["rect"], boxes[j]["rect"])
                 if ratio > 0.20:
-                    overlaps.append({"a": boxes[i]["text"], "b": boxes[j]["text"], "ratio": ratio})
+                    overlaps.append({
+                        "a": boxes[i]["text"],
+                        "b": boxes[j]["text"],
+                        "a_role": role_i,
+                        "b_role": role_j,
+                        "ratio": ratio,
+                    })
         page["overlaps"] = overlaps
         page["body_fill_ratio"] = page["body_used"] / max(1, page["body_capacity"])
         if page["min_font_size"] == 999:
@@ -498,6 +536,8 @@ def drawn_boxes_to_report(
 
     return {
         "missing_block_ids": missing_refs,
+        "missing_non_body_refs": missing_non_body_refs,
+        "truncated_boxes": truncated_boxes,
         "unrendered_body_chars": unrendered_body_chars,
         "pages": list(pages.values()),
     }
