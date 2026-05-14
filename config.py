@@ -12,22 +12,28 @@ PROMPT_DIR = os.path.join(BASE_DIR, "prompts")
 FONT_DIR = os.path.join(DATA_DIR, "fonts")
 
 MAX_RETRIES = 2
+MAX_LAYOUT_RETRIES = 3
 PDF_RENDER_ZOOM = 3.0
 DEBUG_SAVE_INTERMEDIATE = True
 
-# Global document translation. v3 parses all pages first, then translates body flow once.
+# The pipeline parses all pages first, translates the article body as one document,
+# and renders the body with one global typographic style.
 USE_DOCUMENT_LEVEL_TRANSLATION = True
 DOCUMENT_TRANSLATION_MODEL = "gpt-4o"
 
-# Keep one fixed body font size across pages in the same article.
-# If set to None, renderer computes it from page width once and reuses it.
+# Body typography search range. The renderer searches within these ratios and
+# chooses a page-balanced size/spacing plan for the whole article.
 BODY_FONT_SIZE = None
-BODY_LINE_GAP_RATIO = 0.55
+BODY_MIN_SIZE_RATIO = 0.0105
+BODY_MAX_SIZE_RATIO = 0.0160
+BODY_TARGET_FILL_RATIO = 0.74
+BODY_LINE_GAP_CANDIDATES = [0.20, 0.28, 0.36, 0.44, 0.54, 0.66]
+BODY_PARAGRAPH_GAP_CANDIDATES = [0.45, 0.65, 0.85, 1.05, 1.25]
 BODY_FIRST_LINE_INDENT_EM = 2
-BODY_PARAGRAPH_GAP_RATIO = 0.65
-BODY_HEADING_GAP_RATIO = 0.45
+BODY_HEADING_SIZE_RATIO = 1.38
+BODY_HEADING_GAP_RATIO = 0.75
 
-# Font setup. Put CJK fonts here; otherwise fallback to data/simhei.ttf.
+# Fonts. The user keeps simhei.ttf inside FONT_DIR, so the fallback path points there.
 FONT_REGULAR = os.path.join(FONT_DIR, "NotoSansCJK-Regular.otf")
 FONT_MEDIUM = os.path.join(FONT_DIR, "NotoSansCJK-Medium.otf")
 FONT_BOLD = os.path.join(FONT_DIR, "NotoSansCJK-Bold.otf")
@@ -38,6 +44,7 @@ COLOR_BODY = (32, 32, 32)
 COLOR_TITLE_RED = (180, 45, 55)
 COLOR_SUBHEAD_RED = (176, 73, 55)
 COLOR_ACCENT_GREEN = (151, 170, 54)
+COLOR_QUOTE_MARK = (198, 106, 82)
 COLOR_MUTED = (84, 84, 84)
 COLOR_WHITE = (255, 255, 255)
 

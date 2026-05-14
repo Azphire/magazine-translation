@@ -8,26 +8,25 @@ from PIL import Image
 
 from agents.critics import parser_critic_node
 from agents.document_translator import translate_document
+from agents.layout_critic import layout_critic_node
 from agents.memory import MemoryAgent
-from agents.renderer import renderer_node
+from agents.renderer import render_document_pages
 from agents.vision_parser import vision_parser_node
-from config import MAX_RETRIES, OUTPUT_DIR, PDF_RENDER_ZOOM, TEMP_DIR
+from config import MAX_LAYOUT_RETRIES, MAX_RETRIES, OUTPUT_DIR, PDF_RENDER_ZOOM, TEMP_DIR
 from core.state import TranslationState
 from utils.logger import logger
 
 
 def extract_pdf_text_lines(page: fitz.Page, zoom: float) -> List[Dict]:
     """
-    Extract vector text boxes directly from the PDF.
+    Extract vector text boxes from the PDF and scale them to rendered image pixels.
 
-    v3 improvement:
-    - keep both line boxes and span boxes;
-    - scale coordinates to rendered image pixels;
-    - these boxes are used only for erasing/layout coverage, not translation.
+    These boxes are used for erasing and coverage checks. Translation still uses
+    parser blocks because vector text alone does not encode magazine semantics.
     """
     lines: List[Dict] = []
     data = page.get_text("dict")
-    idx = 0
+    index = 0
     for block in data.get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -40,37 +39,36 @@ def extract_pdf_text_lines(page: fitz.Page, zoom: float) -> List[Dict]:
             if bbox:
                 x1, y1, x2, y2 = bbox
                 lines.append({
-                    "id": idx,
+                    "id": index,
                     "box": [int(round(x1 * zoom)), int(round(y1 * zoom)), int(round(x2 * zoom)), int(round(y2 * zoom))],
                     "text": text,
                     "source": "pdf_line",
                 })
-                idx += 1
+                index += 1
             for span in spans:
-                stext = str(span.get("text", "")).strip()
-                sb = span.get("bbox")
-                if not stext or not sb:
+                span_text = str(span.get("text", "")).strip()
+                span_box = span.get("bbox")
+                if not span_text or not span_box:
                     continue
-                x1, y1, x2, y2 = sb
-                # Span boxes are useful when line boxes are too loose or line extraction misses small fragments.
+                x1, y1, x2, y2 = span_box
                 lines.append({
-                    "id": idx,
+                    "id": index,
                     "box": [int(round(x1 * zoom)), int(round(y1 * zoom)), int(round(x2 * zoom)), int(round(y2 * zoom))],
-                    "text": stext,
+                    "text": span_text,
                     "source": "pdf_span",
                 })
-                idx += 1
+                index += 1
     logger.info(f"[PDF Text] Extracted {len(lines)} vector line/span boxes.")
     return lines
 
 
 def render_pdf_page_to_image(page: fitz.Page, page_num: int, temp_dir: str, zoom: float) -> str:
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat, alpha=False)
+    matrix = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=matrix, alpha=False)
     os.makedirs(temp_dir, exist_ok=True)
-    img_path = os.path.join(temp_dir, f"page_{page_num}.jpg")
-    pix.save(img_path)
-    return img_path
+    image_path = os.path.join(temp_dir, f"page_{page_num}.jpg")
+    pix.save(image_path)
+    return image_path
 
 
 def run_parser_with_retries(state: TranslationState) -> TranslationState:
@@ -87,27 +85,26 @@ def run_parser_with_retries(state: TranslationState) -> TranslationState:
 
 
 def build_pdf_from_images(image_paths: List[str], output_pdf_path: str) -> None:
-    """
-    Robust PDF stitching. Avoid PIL multi-page edge cases by inserting every image
-    into a new PyMuPDF page explicitly.
-    """
+    """Insert every rendered page image into a new PDF page explicitly."""
     if not image_paths:
         raise ValueError("No images to stitch into PDF.")
     os.makedirs(os.path.dirname(output_pdf_path), exist_ok=True)
     pdf = fitz.open()
-    for img_path in image_paths:
-        if not img_path or not os.path.exists(img_path):
-            logger.warning(f"[PDF Stitch] Missing output image skipped: {img_path}")
+    inserted = 0
+    for image_path in image_paths:
+        if not image_path or not os.path.exists(image_path):
+            logger.warning(f"[PDF Stitch] Missing output image skipped: {image_path}")
             continue
-        with Image.open(img_path) as im:
-            w, h = im.size
-        page = pdf.new_page(width=w, height=h)
-        page.insert_image(fitz.Rect(0, 0, w, h), filename=img_path)
+        with Image.open(image_path) as image:
+            width, height = image.size
+        page = pdf.new_page(width=width, height=height)
+        page.insert_image(fitz.Rect(0, 0, width, height), filename=image_path)
+        inserted += 1
     if pdf.page_count == 0:
         raise ValueError("PDF stitch failed: no valid image pages were inserted.")
     pdf.save(output_pdf_path, deflate=True)
     pdf.close()
-    logger.info(f"✅ Stitched {len(image_paths)} image pages into PDF: {output_pdf_path}")
+    logger.info(f"✅ Stitched {inserted} image pages into PDF: {output_pdf_path}")
 
 
 def parse_pdf_pages(doc: fitz.Document, memory_agent: MemoryAgent) -> List[TranslationState]:
@@ -115,11 +112,11 @@ def parse_pdf_pages(doc: fitz.Document, memory_agent: MemoryAgent) -> List[Trans
     for page_num in range(len(doc)):
         logger.info(f"\n--- Parse page {page_num + 1}/{len(doc)} ---")
         page = doc.load_page(page_num)
-        img_path = render_pdf_page_to_image(page, page_num, TEMP_DIR, PDF_RENDER_ZOOM)
+        image_path = render_pdf_page_to_image(page, page_num, TEMP_DIR, PDF_RENDER_ZOOM)
         pdf_text_lines = extract_pdf_text_lines(page, PDF_RENDER_ZOOM)
 
         state = TranslationState(
-            image_path=img_path,
+            image_path=image_path,
             page_num=page_num,
             pdf_text_lines=pdf_text_lines,
             memory_dict=memory_agent.get_memory_context(),
@@ -129,54 +126,53 @@ def parse_pdf_pages(doc: fitz.Document, memory_agent: MemoryAgent) -> List[Trans
         )
         state = run_parser_with_retries(state)
         if state.get("parser_errors"):
-            logger.error(f"[Page {page_num}] Parser failed but page will still be rendered if possible: {state.get('parser_errors')}")
+            logger.error(f"[Page {page_num}] Parser failed but rendering will still be attempted: {state.get('parser_errors')}")
         page_states.append(state)
     return page_states
 
 
-def render_translated_pages(page_states: List[TranslationState], document_translation: Dict) -> List[str]:
-    output_images: List[str] = []
-    flow_context: Dict = {
-        "use_global_body_flow": bool(document_translation.get("use_global_body_flow")),
-        "global_body_queue": list(document_translation.get("global_body_flow") or []),
-    }
-
-    for state in page_states:
-        page_num = int(state.get("page_num", 0))
-        logger.info(f"\n--- Render page {page_num + 1}/{len(page_states)} ---")
-        state["flow_context"] = flow_context
-        result = renderer_node(state)
-        state.update(result)
-        flow_context = state.get("flow_context", flow_context)
-        out = state.get("output_image_path")
-        if out and os.path.exists(out):
-            output_images.append(out)
-        else:
-            logger.error(f"[Render] Page {page_num} did not produce an output image.")
-
-    if flow_context.get("body_overflow_elements"):
-        logger.warning(
-            f"[Flow] Unrendered body overflow after last page: "
-            f"{len(flow_context['body_overflow_elements'])} elements."
+def render_with_layout_critic(page_states: List[TranslationState], document_translation: Dict) -> Dict:
+    """
+    Render the document and retry with adjusted typography if layout checks fail.
+    """
+    suggestions: Dict = {}
+    last_result: Dict = {}
+    for attempt in range(MAX_LAYOUT_RETRIES + 1):
+        logger.info(f"\n--- Layout render attempt {attempt + 1}/{MAX_LAYOUT_RETRIES + 1} ---")
+        last_result = render_document_pages(
+            page_states=page_states,
+            document_translation=document_translation,
+            layout_suggestions=suggestions,
         )
-    return output_images
+        critic_result = layout_critic_node({
+            "layout_report": last_result.get("layout_report", {}),
+            "layout_retry_count": attempt,
+        })
+        if not critic_result.get("layout_errors"):
+            logger.info("[Layout] Accepted by layout critic.")
+            break
+        logger.warning(f"[Layout] Rejected by critic: {critic_result.get('layout_errors')}")
+        suggestions = critic_result.get("layout_suggestions", {}) or {}
+    return last_result
 
 
 def update_memory_from_document(memory_agent: MemoryAgent, page_states: List[TranslationState], document_translation: Dict) -> None:
     pairs = []
     for state in page_states:
-        for b in state.get("translated_blocks", []) or []:
-            if b.get("source_text") and b.get("target_text"):
-                pairs.append(b)
-    # Add synthetic body pairs from global flow so terminology memory sees cross-page body translation.
-    for i, elem in enumerate(document_translation.get("global_body_flow") or []):
-        pairs.append({"source_text": " / ".join(elem.get("source_refs", [])), "target_text": elem.get("text", "")})
+        for block in state.get("translated_blocks", []) or []:
+            if block.get("source_text") and block.get("target_text"):
+                pairs.append(block)
+    for elem in document_translation.get("global_body_flow") or []:
+        pairs.append({
+            "source_text": " / ".join(elem.get("source_refs", [])),
+            "target_text": elem.get("text", ""),
+        })
     if pairs:
         memory_agent.update_memory(pairs)
 
 
-def process_pdf(pdf_path: str, output_pdf_path: str):
-    logger.info(f"=== Starting Magazine Translation Pipeline v3: {pdf_path} ===")
+def process_pdf(pdf_path: str, output_pdf_path: str) -> None:
+    logger.info(f"=== Starting Magazine Translation Pipeline v4: {pdf_path} ===")
     os.makedirs(TEMP_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -184,10 +180,15 @@ def process_pdf(pdf_path: str, output_pdf_path: str):
     doc = fitz.open(pdf_path)
     page_states = parse_pdf_pages(doc, memory_agent)
 
-    logger.info("\n=== Document-level translation: judging cross-page continuity and translating global body flow ===")
-    page_states, document_translation = translate_document(page_states, memory_agent.get_memory_context(), max_retries=MAX_RETRIES)
+    logger.info("\n=== Document-level translation and cross-page continuity analysis ===")
+    page_states, document_translation = translate_document(
+        page_states,
+        memory_agent.get_memory_context(),
+        max_retries=MAX_RETRIES,
+    )
 
-    output_images = render_translated_pages(page_states, document_translation)
+    render_result = render_with_layout_critic(page_states, document_translation)
+    output_images = render_result.get("output_image_paths", [])
     update_memory_from_document(memory_agent, page_states, document_translation)
 
     if output_images:
@@ -196,18 +197,18 @@ def process_pdf(pdf_path: str, output_pdf_path: str):
         logger.error("No output pages were generated.")
 
 
-def process_sample_images(image_paths: List[str], output_dir: Optional[str] = None):
+def process_sample_images(image_paths: List[str], output_dir: Optional[str] = None) -> None:
     """
-    Debug helper for already-rendered page images. It cannot use PDF-native boxes,
-    so English erasing falls back to OCR + CV text-line detection.
+    Debug helper for already-rendered page images.
+
+    It cannot use PDF-native boxes, so erasing falls back to OCR and CV text-line detection.
     """
-    output_dir = output_dir or OUTPUT_DIR
-    os.makedirs(output_dir, exist_ok=True)
+    _ = output_dir or OUTPUT_DIR
     memory_agent = MemoryAgent()
     page_states: List[TranslationState] = []
-    for page_num, img_path in enumerate(image_paths):
+    for page_num, image_path in enumerate(image_paths):
         state = TranslationState(
-            image_path=img_path,
+            image_path=image_path,
             page_num=page_num,
             pdf_text_lines=[],
             memory_dict=memory_agent.get_memory_context(),
@@ -217,8 +218,12 @@ def process_sample_images(image_paths: List[str], output_dir: Optional[str] = No
         )
         page_states.append(run_parser_with_retries(state))
 
-    page_states, document_translation = translate_document(page_states, memory_agent.get_memory_context(), max_retries=MAX_RETRIES)
-    render_translated_pages(page_states, document_translation)
+    page_states, document_translation = translate_document(
+        page_states,
+        memory_agent.get_memory_context(),
+        max_retries=MAX_RETRIES,
+    )
+    render_with_layout_critic(page_states, document_translation)
 
 
 if __name__ == "__main__":

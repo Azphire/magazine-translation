@@ -24,11 +24,16 @@ class TranslationState(TypedDict, total=False):
     translator_errors: Optional[str]
     translator_retry_count: int
 
-    # Shared across pages to keep body font size and body flow continuous.
+    # Optional compatibility state for old per-page rendering paths.
     flow_context: Dict[str, Any]
 
-    # v3 document-level translation result. The global body queue is stored in flow_context.
+    # Document-level translation and layout diagnostics.
     document_translation: Dict[str, Any]
+    layout_report: Dict[str, Any]
+    layout_errors: Optional[str]
+    layout_retry_count: int
+    layout_suggestions: Dict[str, Any]
 
     output_image_path: Optional[str]
+    output_image_paths: List[str]
     debug_paths: Dict[str, str]

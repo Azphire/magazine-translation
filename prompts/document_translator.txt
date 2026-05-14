@@ -1,5 +1,4 @@
-You are a senior Chief Editor for the Chinese edition of an international magazine.
-You receive all parsed text blocks from multiple consecutive magazine pages. Some body paragraphs may continue across page boundaries. Your task is to translate the article at DOCUMENT LEVEL, not page by page.
+You are translating a multi-page magazine article into publication-quality Chinese.
 
 [Cross-Page Terminology Memory]
 [MEMORY]
@@ -7,47 +6,45 @@ You receive all parsed text blocks from multiple consecutive magazine pages. Som
 [Document Blocks]
 [DOCUMENT_BLOCKS]
 
-Return STRICT JSON with this schema:
+Tasks:
+1. Determine whether body text across pages is continuous.
+2. If the body is continuous, preserve one global reading order across all pages.
+3. Translate every source block. Do not omit body paragraphs, section headings, captions, quotes, author bios, footers, or kickers.
+4. Preserve section headings as separate heading elements in the global body flow.
+5. Merge body fragments only when they are part of the same logical paragraph or the same continuous section.
+6. Keep Chinese concise enough for magazine layout, but do not delete facts.
+7. Do not leave English residue except Latin scientific names, official English names in parentheses, and acronyms such as WTO, CBD, WIPO, UNESCO.
+8. Use terminology from the memory dictionary consistently.
+
+Return strict JSON only:
 {
   "continuity": [
-    {"from_page": 0, "to_page": 1, "is_continuous": true, "reason": "The body sentence/paragraph continues across the page turn."}
+    {
+      "from_page": 0,
+      "to_page": 1,
+      "is_continuous": true,
+      "reason": "..."
+    }
+  ],
+  "global_body_order": [
+    {"page": 0, "block_id": 1},
+    {"page": 0, "block_id": 2},
+    {"page": 1, "block_id": 3}
   ],
   "block_translations": {
-    "p0_b0": "非正文块的中文翻译，例如栏目、标题、导语、作者、引文、图片说明、页脚等",
-    "p0_b1": "..."
+    "p0_b0": "Chinese translation for this exact block",
+    "p0_b1": "Chinese translation for this exact block"
   },
   "global_body_flow": [
-    {"type": "paragraph", "source_refs": ["p0_b5", "p0_b6"], "text": "跨页正文统一翻译后的中文段落。"},
-    {"type": "heading", "source_refs": ["p1_b2"], "text": "明确的同意"}
+    {
+      "type": "paragraph",
+      "source_refs": ["p0_b4"],
+      "text": "Chinese paragraph text"
+    },
+    {
+      "type": "heading",
+      "source_refs": ["p0_b5"],
+      "text": "Chinese section heading"
+    }
   ]
 }
-
-Rules:
-
-1. Judge continuity first.
-For every adjacent page pair, decide whether the main body article continues from the previous page to the next page. If yes, set is_continuous=true. Use body reading order, incomplete paragraphs, and topic continuity as evidence.
-
-2. Translate body text as one continuous article flow.
-All blocks whose style is "body" or "body_heading" and belong to the same article must be translated together in global_body_flow, preserving logical paragraph order across pages.
-- body_heading -> {"type": "heading"}
-- body -> {"type": "paragraph"}
-- If one paragraph is split into multiple source blocks or pages, merge the source_refs into one paragraph and translate once.
-- Do not translate each OCR line separately.
-- Do not insert artificial line breaks.
-
-3. Translate non-body blocks in block_translations.
-For styles kicker, title, subtitle, author, quote, caption, footer, and other, provide concise Chinese translation keyed by the original key.
-For body/body_heading blocks, block_translations is optional because global_body_flow is authoritative.
-
-4. No English residue.
-Do not leave English words untranslated unless they are:
-- personal names in parentheses,
-- scientific Latin names,
-- official acronyms such as UNESCO, WIPO, WTO, CBD,
-- URLs/emails.
-Terms such as biopiracy, knowledge holders, benefit-sharing, Indigenous knowledge, traditional knowledge, misappropriation, genetic resources, intellectual property, patent, consent, common heritage, Indigenous peoples, and local communities must be translated into Chinese.
-
-5. Publication quality.
-Use natural, concise Chinese magazine prose. The body will be flowed into fixed magazine columns with one uniform font size across pages, so avoid verbosity.
-
-6. Return JSON only. Do not add explanations outside JSON.
