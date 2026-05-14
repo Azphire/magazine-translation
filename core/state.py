@@ -1,26 +1,34 @@
-from typing import TypedDict, List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional, TypedDict
 
 
-class TranslationState(TypedDict):
-    """
-    Represents the state of the magazine translation pipeline.
-    This state is passed between all nodes in the LangGraph.
-    """
-    # 1. Inputs
+class TranslationState(TypedDict, total=False):
     image_path: str
+    page_num: int
 
-    # 2. Vision Parsing Phase
+    # PDF-native text boxes from PyMuPDF, already scaled to rendered image pixels.
+    pdf_text_lines: List[Dict[str, Any]]
+
+    # OCR fallback lines from RapidOCR.
+    raw_ocr: List[Dict[str, Any]]
+
+    # CV fallback text-line boxes detected directly from image pixels.
+    cv_text_lines: List[Dict[str, Any]]
+
     parsed_json: Optional[Dict[str, Any]]
     parser_errors: Optional[str]
     parser_retry_count: int
 
-    # 3. Memory Phase
     memory_dict: Dict[str, str]
 
-    # 4. Translation Phase
     translated_blocks: List[Dict[str, Any]]
     translator_errors: Optional[str]
     translator_retry_count: int
 
-    # 5. Output
+    # Shared across pages to keep body font size and body flow continuous.
+    flow_context: Dict[str, Any]
+
+    # v3 document-level translation result. The global body queue is stored in flow_context.
+    document_translation: Dict[str, Any]
+
     output_image_path: Optional[str]
+    debug_paths: Dict[str, str]

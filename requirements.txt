@@ -1,0 +1,11 @@
+openai
+langchain-openai
+langchain-core
+langgraph
+pydantic
+python-dotenv
+rapidocr-onnxruntime
+opencv-python
+numpy
+Pillow
+PyMuPDF

@@ -1,6 +1,23 @@
-You are an expert in terminology extraction. Please extract important proper nouns (names of people, places, organizations, specific technical terms) from the following English-Chinese bilingual text of a magazine page.
-If there are no important proper nouns, return an empty JSON.
-Please return STRICTLY in JSON key-value format, for example: {"Lagipoiva Cherelle Jackson": "拉吉波伊瓦·切雷尔·杰克逊", "zaï techniques": "扎伊技术"}
+You are an expert in bilingual terminology extraction for magazine translation.
 
-Text content:
+Extract important cross-page terms from the following English-Chinese bilingual content:
+- person names
+- place names
+- organizations
+- recurring concepts
+- scientific names and their preferred Chinese names
+- article-specific key terms
+
+Return strict JSON key-value format:
+{
+  "English term": "Chinese term"
+}
+
+Rules:
+1. Do not extract generic words unless they are recurring article concepts.
+2. Preserve official names and established translations.
+3. If no useful terms exist, return {}.
+4. Return JSON only.
+
+Bilingual content:
 [COMBINED_TEXT]

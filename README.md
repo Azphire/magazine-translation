@@ -1,1 +1,1 @@
-# magazine-translation
+# Magazine Translation
